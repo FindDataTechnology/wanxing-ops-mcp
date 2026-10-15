@@ -1,0 +1,38 @@
+{
+  "schema": "mcp-tool-surface/v1",
+  "server": "wanxing-ops-mcp",
+  "entry_path": "/wanxing-ops-mcp",
+  "product_line": "wanxing",
+  "hosting": ["shared-instance"],
+  "description": "萬星（wanxing 线）舰队操作 MCP：公开目录/AgentCard、部署者允许清单与启停（平台令牌，用户委托）、A2A 回合（caller key，计费门）。双凭据分型，回执不冒充结果。",
+  "skills_eligible_for_packs": [
+    "wanxing-fleet-ops"
+  ],
+  "tool_groups": [
+    {
+      "group": "fleet",
+      "level": "commercial",
+      "tools": [
+        "wanxing_agents_browse",
+        "wanxing_agent_card",
+        "wanxing_callers_list",
+        "wanxing_callers_add",
+        "wanxing_callers_remove",
+        "wanxing_agent_pause",
+        "wanxing_agent_resume"
+      ],
+      "data_sources": [
+        "壹座萬星对客面 /api/wanxing/v1/* 与 /api/packs/*/deployments/*"
+      ],
+      "notes": "管理面以调用方平台令牌执行（packAuth/resolveUser 判定）；写操作显式命名；401/403/404/409/423/429 如实透传。"
+    },
+    {
+      "group": "turns",
+      "level": "internal",
+      "tools": [
+        "wanxing_agent_turn"
+      ],
+      "notes": "计费动作（caller key 边界结算）不进 pack 商业面——消费走用户自己的 caller key，包装成本面会引入代计费。promote_when：出现可信的按用户分账场景再评。"
+    }
+  ]
+}
