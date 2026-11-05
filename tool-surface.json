@@ -39,7 +39,8 @@
       "group": "turns",
       "level": "internal",
       "tools": [
-        "wanxing_agent_turn"
+        "wanxing_agent_turn",
+        "wanxing_fleet_board"
       ],
       "notes": "计费动作（caller key 边界结算）不进 pack 商业面——消费走用户自己的 caller key，包装成本面会引入代计费。promote_when：出现可信的按用户分账场景再评。"
     }
