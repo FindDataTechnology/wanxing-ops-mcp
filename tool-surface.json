@@ -8,7 +8,10 @@
   ],
   "description": "萬星（wanxing 线）舰队操作 MCP：公开目录/AgentCard、部署者允许清单与启停（平台令牌，用户委托）、A2A 回合（caller key，计费门）。双凭据分型，回执不冒充结果。",
   "skills_eligible_for_packs": [
-    "wanxing-fleet-ops"
+    "wanxing-browse-guidance",
+    "deployment-precheck-guidance",
+    "fleet-readonly-db-patrol",
+    "fleet-governance-proposal-card"
   ],
   "naming_convention": {
     "order": "verb_noun",
