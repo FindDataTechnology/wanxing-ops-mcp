@@ -11,6 +11,10 @@ from __future__ import annotations
 import hashlib
 import time
 
+# 上游权威：本家族门「有 Bearer 即放行」，真校验（含 401）由上游/工具层负责，
+# 缓存只为同一个 bearer 的去抖；因此到界整体清空即可，代价只是多判一次。
+_CACHE_MAX = 1024
+
 
 class AuthGate:
     """有 Bearer 即放行（探针不可用时的家族变体；语义收窄在 spec 已声明）。"""
@@ -30,6 +34,8 @@ class AuthGate:
         hit = self._cache.get(key)
         if hit and now - hit[0] < self._ttl:
             return hit[1]
+        if len(self._cache) >= _CACHE_MAX:
+            self._cache.clear()  # 有界：任意 bearer 都能写一条，无界即 RSS 泄漏面
         self._cache[key] = (now, True)
         return True
 

@@ -44,14 +44,20 @@ class RegistryClient:
         method: str,
         path: str,
         *,
-        bearer: str | None,
+        bearer: str | None = None,
         params: dict | None = None,
         json_body: Any | None = None,
         headers: dict | None = None,
+        anonymous: bool = False,
     ) -> Any:
-        if not bearer:
+        if anonymous:
+            # 公开读面（/agents、agent-card）上游不读 Authorization：不发头，
+            # 也不把「无凭据」伪装成 `Bearer anonymous`（那是自造凭据，污染上游归因）。
+            req_headers: dict[str, str] = {}
+        elif not bearer:
             raise RegistryError("missing_credential", 401, MISSING_CREDENTIAL_HINT)
-        req_headers = {"Authorization": f"Bearer {bearer}"}
+        else:
+            req_headers = {"Authorization": f"Bearer {bearer}"}
         if headers:
             req_headers.update(headers)
         try:

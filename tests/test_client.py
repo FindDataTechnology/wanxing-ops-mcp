@@ -39,6 +39,19 @@ async def test_missing_credential_never_touches_upstream():
     assert MISSING_CREDENTIAL_HINT in ei.value.detail
 
 
+async def test_anonymous_sends_no_authorization_header():
+    # 公开读面自造 "anonymous" 凭据会污染上游归因：正确做法是压根不发这个头
+    seen = {}
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        seen["auth"] = request.headers.get("Authorization")
+        return httpx.Response(200, json={"agents": []})
+
+    client = make_client(handler)
+    await client.request("GET", "/api/wanxing/v1/agents", anonymous=True)
+    assert seen["auth"] is None
+
+
 @pytest.mark.parametrize(
     "status,kind",
     [(401, "unauthorized"), (402, "billing"), (403, "forbidden"), (404, "not_found"),

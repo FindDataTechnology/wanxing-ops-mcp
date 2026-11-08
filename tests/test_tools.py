@@ -15,9 +15,11 @@ class FakeClient:
         self.result = result
         self.error = error
 
-    async def request(self, method, path, *, bearer, params=None, json_body=None, headers=None):
+    async def request(self, method, path, *, bearer=None, params=None, json_body=None,
+                      headers=None, anonymous=False):
         self.calls.append({"method": method, "path": path, "bearer": bearer,
-                           "params": params, "json_body": json_body, "headers": headers})
+                           "params": params, "json_body": json_body, "headers": headers,
+                           "anonymous": anonymous})
         if self.error:
             raise self.error
         return self.result
@@ -25,7 +27,7 @@ class FakeClient:
 
 @pytest.fixture
 def bearer(monkeypatch):
-    monkeypatch.setattr(tf, "_current_bearer", lambda: "tok-abc")
+    monkeypatch.setattr(tf, "_inbound_bearer", lambda: "tok-abc")
     return "tok-abc"
 
 
@@ -101,7 +103,7 @@ async def test_turn_generates_uuid_key_when_absent(bearer):
 
 
 async def test_turn_requires_credential(monkeypatch):
-    monkeypatch.setattr(tf, "_current_bearer", lambda: None)
+    monkeypatch.setattr(tf, "_inbound_bearer", lambda: None)
     fake = FakeClient()
     mcp = await _mk(fake)
     async with Client(mcp) as c:
@@ -109,6 +111,43 @@ async def test_turn_requires_credential(monkeypatch):
             await c.call_tool("wanxing_agent_turn", {"agent_slug": "s", "text": "x"})
     assert "caller key" in str(ei.value)
     assert fake.calls == []  # 未触上游
+
+
+async def test_turn_never_falls_back_to_service_token(monkeypatch):
+    # 注释承诺「turn 永不回落」，这条锁住它：没有进站 bearer 就是缺凭据，
+    # 不许拿 WANXING_OPS_TOKEN 的服务身份去跑计费回合。
+    monkeypatch.setenv("WANXING_OPS_TOKEN", "svc-ops-token")
+    monkeypatch.setattr(tf, "_inbound_bearer", lambda: None)
+    fake = FakeClient()
+    mcp = await _mk(fake)
+    async with Client(mcp) as c:
+        with pytest.raises(Exception) as ei:
+            await c.call_tool("wanxing_agent_turn", {"agent_slug": "s", "text": "x"})
+    assert "caller key" in str(ei.value)
+    assert fake.calls == []  # 服务身份未被执行
+
+
+async def test_admin_tools_still_fall_back_to_service_token(monkeypatch):
+    # 管理面回落是设计内的 ops 服务行为，收紧 turn 不应波及它
+    monkeypatch.setenv("WANXING_OPS_TOKEN", "svc-ops-token")
+    monkeypatch.setattr(tf, "_inbound_bearer", lambda: None)
+    fake = FakeClient(result={"ok": True})
+    mcp = await _mk(fake)
+    async with Client(mcp) as c:
+        await c.call_tool("wanxing_callers_list", {"agent_slug": "s1"})
+    assert fake.calls[0]["bearer"] == "svc-ops-token"
+
+
+async def test_public_reads_send_no_bearer(monkeypatch):
+    # 不把字面量 "anonymous" 当凭据发出去
+    monkeypatch.setattr(tf, "_inbound_bearer", lambda: "tok-abc")
+    fake = FakeClient(result={"agents": []})
+    mcp = await _mk(fake)
+    async with Client(mcp) as c:
+        await c.call_tool("wanxing_agents_browse", {})
+        await c.call_tool("wanxing_agent_card", {"agent_slug": "s1"})
+    for call in fake.calls:
+        assert call["anonymous"] is True and call["bearer"] is None
 
 
 async def test_billing_402_propagates(bearer):

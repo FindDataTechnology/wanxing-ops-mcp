@@ -21,25 +21,33 @@ TURN_RECEIPT_NOTE = (
 )
 
 
+def _inbound_bearer() -> str | None:
+    """只读进站 Authorization，绝不回落。对话型 turn 用它——计费门必须 caller key。"""
+    try:
+        from fastmcp.server.dependencies import get_http_request
+        req = get_http_request()
+    except (ImportError, RuntimeError):
+        # 无 HTTP 请求上下文（stdio 传输/后台任务）：没有进站凭据，绝不用服务身份顶替
+        return None
+    if req is None:
+        return None
+    auth = (req.headers.get("Authorization") or req.headers.get("authorization") or "").strip()
+    if auth.lower().startswith("bearer "):
+        return auth[7:].strip() or None
+    return None
+
+
 def _current_bearer() -> str | None:
     # 管理面凭据优先级（unify-wanxing-a2a-face 3.3）：进站头委托的 bearer 先
     # （调用方自带平台令牌/调用键），缺省回落服务凭据 WANXING_OPS_TOKEN
     # （wanxing-fleet secret ingest_token，与 facade ownerGate token 路径同源）
-    # ——无人委托时管理工具仍可执行（ops 服务身份），对话型 turn 永不回落
-    # （计费门必须 caller key）。
-    try:
-        from fastmcp.server.dependencies import get_http_request
-    except ImportError:
-        req = None
-    else:
-        req = get_http_request()
-    if req is not None:
-        auth = (req.headers.get("Authorization") or req.headers.get("authorization") or "").strip()
-        if auth.lower().startswith("bearer "):
-            return auth[7:].strip() or None
+    # ——无人委托时管理工具仍可执行（ops 服务身份）。对话型 turn 不走这里：
+    # 它用 _inbound_bearer()，永不回落（计费门必须 caller key）。
+    inbound = _inbound_bearer()
+    if inbound:
+        return inbound
     import os
-    env_tok = os.environ.get("WANXING_OPS_TOKEN") or ""
-    return env_tok or None
+    return os.environ.get("WANXING_OPS_TOKEN") or None
 
 
 def register(mcp: FastMCP, client: RegistryClient) -> None:
@@ -55,7 +63,7 @@ def register(mcp: FastMCP, client: RegistryClient) -> None:
         """
         return await client.request(
             "GET", "/api/wanxing/v1/agents",
-            bearer=_current_bearer() or "anonymous",
+            anonymous=True,
             params={"page": page, "page_size": page_size},
         )
 
@@ -69,7 +77,7 @@ def register(mcp: FastMCP, client: RegistryClient) -> None:
         return await client.request(
             "GET",
             f"/api/wanxing/v1/a2a/{agent_slug}/.well-known/agent-card.json",
-            bearer=_current_bearer() or "anonymous",
+            anonymous=True,
         )
 
     @mcp.tool
@@ -146,7 +154,7 @@ def register(mcp: FastMCP, client: RegistryClient) -> None:
         AgentCard）。错误如实转述：402=余额/窗口不足，409=该 agent 已有回合在跑
         （按 Retry-After 重试），423=已暂停，429=超调用者 RPM，404=无此 agent。
         """
-        bearer = _current_bearer()
+        bearer = _inbound_bearer()
         if not bearer:
             raise RegistryError("missing_credential", 401, MISSING_CREDENTIAL_HINT)
         key = idempotency_key or f"wanxing-ops-mcp-{uuid.uuid4()}"

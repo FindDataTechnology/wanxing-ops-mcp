@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from wanxing_ops_mcp.auth_gate import AuthGate
+from wanxing_ops_mcp.auth_gate import _CACHE_MAX, AuthGate
 
 
 async def test_anonymous_rejected():
@@ -18,3 +18,11 @@ async def test_cache_short_circuits():
     gate = AuthGate(ttl_seconds=60)
     await gate.check("tok")
     assert await gate.check("tok") is True  # 缓存路径不抛
+
+
+async def test_cache_is_bounded():
+    # 每个不同 bearer 都会写一条缓存键：没有上界就是长跑进程的 RSS 泄漏面
+    gate = AuthGate()
+    for i in range(_CACHE_MAX * 4):
+        await gate.check(f"tok-{i}")
+    assert len(gate._cache) <= _CACHE_MAX
