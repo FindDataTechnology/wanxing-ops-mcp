@@ -73,7 +73,13 @@ FLEET_LAG_FIELDS = {"source", "event_age_ms", "arrival_age_ms"}
 FLEET_SETTLED_FIELDS = {"count", "usd"}
 FLEET_WAKE_FIELDS = {"p50", "p95"}
 #: 新增段落的内部字段——顶层声明了但内层没人钉，等于只钉了个名字。
-FLEET_LIVENESS_FIELDS = {"state", "seen_at"}
+#:
+#: 2026-11-13 订正：这两个集合原先按**我读错的形状**冻结（`{state, seen_at}` /
+#: `{stalled, silent_ms, reason}`），而发端 `fleet-observer` 实际发的是下面这些
+#: ——名字一个都对不上。当时本文件的断言是绿的，因为它只把契约与自己的常量比，
+#: 从不与发端比。fd-wanxing 侧已补上那半个方向的判据
+#: （`scripts/test-board-contract-shape.mjs`，真起 observer 对账）。
+FLEET_LIVENESS_FIELDS = {"last_seen_at", "age_ms", "beats", "presence"}
 FLEET_LEASE_FIELDS = {
     "available", "events", "expired_in_window", "active", "window_ms", "units",
 }
@@ -81,7 +87,12 @@ FLEET_LEASE_UNIT_FIELDS = {"unit", "state", "holder", "attempt", "at", "age_ms"}
 FLEET_SHORTTERM_FIELDS = {
     "cells", "running", "queued", "workers_busy", "workers_idle", "workers_cap",
 }
-FLEET_AGENT_HEALTH_FIELDS = {"agent", "health", "stalled", "silent_ms", "reason"}
+FLEET_AGENT_HEALTH_FIELDS = {
+    "agent", "health", "since", "consecutive", "consecutiveHours", "turns",
+    "errors", "lastErrorKind", "stale", "window_hours",
+    # 条件字段：只有声明了节奏的 agent 才带后三个
+    "declared_every_ms", "expected_turns", "stalled",
+}
 FLEET_MISSION_FIELDS = {"id", "owner", "status", "trail", "spent", "at"}
 
 #: `$defs.turnReceipt` —— A2A 同步回执（jsonrpc 必带；result/error 二者其一）。
@@ -221,7 +232,8 @@ def _fleet_board() -> dict:
         #    只是对着一份缺段的夹具自证）
         "states_window": "2h",
         "runner_liveness": {
-            "wu-1": {"state": "serving", "seen_at": 1_800_000_000_000},
+            "wu-1": {"last_seen_at": 1_800_000_000_000, "age_ms": 12_000,
+                     "beats": 38282, "presence": "ok"},
             # 缺一个 runner 是**语义**（不在表里＝不报活着），故这里故意只放一个
         },
         "leases": {
@@ -243,8 +255,9 @@ def _fleet_board() -> dict:
             "workers_busy": 1, "workers_idle": 3, "workers_cap": 4,
         },
         "agent_health": [
-            {"agent": "spider-heal", "health": "ok", "stalled": False,
-             "silent_ms": 5000, "reason": None},
+            {"agent": "spider-heal", "health": "ok", "since": None,
+             "consecutive": 0, "consecutiveHours": 0, "turns": 12, "errors": 0,
+             "lastErrorKind": None, "stale": False, "window_hours": 72},
         ],
         "missions": [
             {"id": "m-1", "owner": "ops", "status": "running",
