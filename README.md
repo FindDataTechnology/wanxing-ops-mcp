@@ -1,5 +1,7 @@
 # wanxing-ops-mcp — 萬星舰队操作 MCP
 
+> **Part of the [Constellation line (寻数·萬星)](https://www.finddatatech.cloud/products/constellation) of [FindData](https://www.finddatatech.cloud)** — AI operation surface for the agent fleet: fleet board, run ledger and fleet-health inspection.
+
 萬星（wanxing 线）的动作 MCP（五线 AI 操作面 C2 切片）：把 agent 服务的公开目录、
 AgentCard、部署者允许清单、启停与 A2A 回合暴露给 AI agent。
 
