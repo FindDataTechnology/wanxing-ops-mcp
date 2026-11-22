@@ -7,11 +7,11 @@ name = "wanxing-ops-mcp"
 version = "0.1.0"
 description = "萬星（wanxing 线）舰队操作 MCP：目录/卡片/允许清单/启停/回合，双凭据分型（平台令牌+caller key）。"
 readme = "README.md"
-requires-python = ">=3.10"
+requires-python = ">=3.11"
 license = "MIT"
 authors = [{ name = "FindDataTechnology" }]
 dependencies = [
-    "fastmcp>=2.0",
+    "fastmcp>=4.2.4,<5",
     "click",
     "uvicorn",
     "httpx",
