@@ -12,7 +12,7 @@
       "kind": "customer-key",
       "name": "ciyuan-caller-key",
       "accepts": "ciyuan-sk",
-      "fallback": false,
+      "fallback": true,
       "enforced": true
     }
   ],
