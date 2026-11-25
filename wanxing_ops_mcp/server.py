@@ -9,7 +9,6 @@ from pathlib import Path
 from fd_open_data_protocol import surface_report
 
 from . import SERVER_NAME, tools_fleet
-from .auth_gate import AuthGate, AuthGateMiddleware
 from .client import RegistryClient
 from .config import Settings
 
@@ -26,64 +25,38 @@ _HEALTH_OK_REPORTED = b'{"status":"ok","last_surface_report":"ok"}'
 _HEALTH_FAILED_REPORTED = b'{"status":"ok","last_surface_report":"failed"}'
 
 #: 线自描述端点（converge-line-identity-and-keys 的家族实现）：公开、免鉴权、零网络。
-WELL_KNOWN_PATH = "/.well-known/line-manifest.json"
-LINE_MANIFEST_ENV = "LINE_MANIFEST_PATH"
-#: 清单是运行期契约：改一次要生效，但不能让边缘缓存长期撒谎。
-_MANIFEST_CACHE_CONTROL = "public, max-age=300"
+from fd_open_data_protocol.line_ops import assemble as _assemble
+from fd_open_data_protocol.line_ops.auth_gate import (  # noqa: F401  (tests monkeypatch server.AuthGateMiddleware)
+    AuthGateMiddleware,
+    AuthGate,
+)
+from fd_open_data_protocol.line_ops.wellknown import (
+    LINE_MANIFEST_ENV,
+    WELL_KNOWN_PATH,
+)
+
+#: 清单定位必须锚在本仓 `server.py`，不能锚在 protocol 包里——共享实现的
+#: `__file__` 指向 fd_open_data_protocol 的目录，算出来的仓根是错的
+#: （2026-11-25 实测：五个消费仓的 manifest_path() 全指到 protocol 包里）。
+#: **每次调用读本模块的 `__file__`（不缓存成常量）**：测试会 monkeypatch
+#: `server.__file__` 模拟「pip 装的包在 site-packages」，缓存常量会让它打不中。
+def _anchor():
+    return globals()["__file__"]
 
 
-def manifest_candidates() -> list[Path]:
-    """按优先级列出可能放清单的位置（`LINE_MANIFEST_PATH` 一项即封顶）。
-
-    为什么要链而不是一条：**pip 装进去的包与源码树的 `__file__` 不同**。镜像是
-    console script 起的（Dockerfile CMD），`__file__` 落在 site-packages，
-    `parents[1]` 根本不是仓根——清单就在 `/app/line-manifest.json` 却读不到
-    （lex 线 2026-11-11 真机 404，源码运行验不出来）。所以源码树、CWD（镜像
-    WORKDIR=/app）、与包同级三处依次找。
-    """
-    override = os.environ.get(LINE_MANIFEST_ENV)
-    if override:
-        return [Path(override)]
-    here = Path(__file__).resolve()
-    return [
-        here.parents[1] / "line-manifest.json",  # 源码树 / 镜像里包与清单同根
-        Path.cwd() / "line-manifest.json",       # pip 装的包：CWD 才是仓根
-        here.parent / "line-manifest.json",      # 清单与包同级（兜底）
-    ]
+def manifest_candidates() -> list:
+    from fd_open_data_protocol.line_ops.wellknown import manifest_candidates as _f
+    return _f(_anchor())
 
 
-def manifest_path() -> Path:
-    """实际取用的清单路径；都不存在时返回首选位置（让 404 能点名期望路径）。"""
-    candidates = manifest_candidates()
-    for candidate in candidates:
-        if candidate.exists():
-            return candidate
-    return candidates[0]
+def manifest_path():
+    from fd_open_data_protocol.line_ops.wellknown import manifest_path as _f
+    return _f(_anchor())
 
 
-def manifest_response() -> tuple[int, bytes, list[tuple[bytes, bytes]]]:
-    """(status, body, extra_headers) —— 不读网络、不建会话。
-
-    缺失=404（该线未发布清单，属配置事实）；存在但不可解析=500（属缺陷，
-    不能伪装成 404 让调用方以为"本来就没有"）。200 时回原始字节：仓内那份
-    是唯一事实源，这里重新序列化就会多出第二份可漂移的表象。
-    """
-    json_headers = [(b"content-type", b"application/json; charset=utf-8")]
-    path = manifest_path()
-    try:
-        raw = path.read_bytes()
-    except FileNotFoundError:
-        return 404, b'{"detail":"line-manifest not published"}', json_headers
-    except OSError as exc:
-        return 500, json.dumps(
-            {"detail": f"line-manifest unreadable: {type(exc).__name__}"}).encode(), json_headers
-    try:
-        json.loads(raw)
-    except ValueError:
-        return 500, b'{"detail":"line-manifest is not valid JSON"}', json_headers
-    return 200, raw, json_headers + [
-        (b"cache-control", _MANIFEST_CACHE_CONTROL.encode()),
-    ]
+def manifest_response():
+    from fd_open_data_protocol.line_ops.wellknown import manifest_response as _f
+    return _f(_anchor())
 
 
 def create_server(settings: Settings | None = None) -> "FastMCP":
@@ -100,35 +73,16 @@ def create_server(settings: Settings | None = None) -> "FastMCP":
 
 
 def build_app(settings: Settings | None = None):
-    """完整 ASGI 应用：/health 与线自描述免门；其余（/mcp）走鉴权门（无 Bearer 拒）。"""
-    mcp = create_server(settings)
-    settings_: Settings = mcp._wanxing_ops_settings
-    mcp_app = mcp.http_app(path="/mcp")
-    gate = AuthGateMiddleware(mcp_app, AuthGate(settings_.auth_cache_ttl_seconds))
+    """完整 ASGI 应用：/health 与线自描述免门；其余（/mcp）走鉴权门（无 Bearer 拒）。
 
-    async def app(scope, receive, send):
-        if scope.get("type") == "http":
-            surface_report.ensure_started(mcp)  # 首请求触发：loop 已在跑
-            path = (scope.get("path") or "").rstrip("/")
-            if path == "/health":
-                state = getattr(mcp, "_surface_report", "not_configured")
-                body = {
-                    "not_configured": _HEALTH_OK,
-                    "ok": _HEALTH_OK_REPORTED,
-                    "failed": _HEALTH_FAILED_REPORTED,
-                }.get(state, _HEALTH_OK)
-                await send({"type": "http.response.start", "status": 200,
-                            "headers": [(b"content-type", b"application/json")]})
-                await send({"type": "http.response.body", "body": body})
-                return
-            # 线自描述：公开元数据，必须在鉴权门**之前**应答（与 /health 同理），
-            # 否则平台/客户在未持有本线凭据时连"这条线认哪些钥匙"都读不到。
-            if path == WELL_KNOWN_PATH.rstrip("/"):
-                status, body, headers = manifest_response()
-                await send({"type": "http.response.start", "status": status,
-                            "headers": headers + [(b"content-length", str(len(body)).encode())]})
-                await send({"type": "http.response.body", "body": body})
-                return
-        await gate(scope, receive, send)
-
-    return app
+    ASGI 布线由 `fd_open_data_protocol.line_ops.assemble` 提供（openspec:
+    enforce-mcp-supply-contract / line-ops-runtime-core）。
+    """
+    settings_ = settings or Settings.from_env()
+    return _assemble(
+        lambda: create_server(settings_),
+        auth_cache_ttl_seconds=settings_.auth_cache_ttl_seconds,
+        gate_cls=AuthGateMiddleware,
+        manifest_anchor=_anchor(),
+        enable_surface_report=True,
+    )
